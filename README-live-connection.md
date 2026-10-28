@@ -1,21 +1,24 @@
-# Inkanini RS485: Wokwi to dashboard
+# Inkanini RS485: Wokwi live telemetry
 
-The dashboard now polls `GET /api/telemetry` every 1.2 seconds. The ESP32 sketch posts its current counters, relay state, line status, and most recent event every 1.5 seconds. The API stores the current state and a de-duplicated event log in Upstash Redis so separate Vercel function calls share data.
+GitHub Pages is static hosting: it cannot receive the ESP32's `POST` requests. Sending telemetry to `samukelisiwephiri.github.io/hacksecure/` therefore returns HTTP 405. A serverless API must be deployed separately; this project includes the Vercel function at `api/telemetry.js`.
 
-## Deploy the API with the dashboard
+## Deploy the receiver
 
-1. In Vercel, connect the Git repository used by `inkanini-rs485.vercel.app` and copy the files from this `outputs` folder into its project root. Keep `index.html` at the root and `api/telemetry.js` under `api/`.
-2. In Vercel Marketplace, add an Upstash Redis database to that project. It supplies `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
-3. Add a Vercel environment variable named `TELEMETRY_DEVICE_TOKEN` with a new random value. Add it to Production (and Preview if needed), then redeploy.
-4. In `wokwi-sketch.ino`, replace `REPLACE_WITH_TELEMETRY_DEVICE_TOKEN` with the same value and keep the endpoint URL pointed at the deployed project.
-5. Paste the sketch into Wokwi, start the simulation, and watch the dashboard. Press the attack/fault buttons in the simulation; the blocked counter, relay state and event log should update within a few seconds.
+1. Import the directory containing `index.html` and `api/telemetry.js` as a Vercel project. If importing the parent repository, set the Vercel Root Directory to `outputs/inkanini-rs485-live-project`.
+2. Connect an Upstash Redis database to the Vercel project and make sure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set in its environment.
+3. Add `TELEMETRY_DEVICE_TOKEN` as a Vercel environment variable with a new random value, then deploy. Copy the deployment origin Vercel assigns (for example, `https://your-project.vercel.app`). The previously documented `inkanini-rs485.vercel.app` URL is not currently serving this API.
+4. Verify `https://your-project.vercel.app/api/telemetry` returns HTTP 200 JSON. An empty store should return `{"state":null,"events":[]}`.
 
-## Payload and endpoint
+## Point Wokwi and the dashboard at the API
 
-`POST /api/telemetry` requires the `X-Device-Token` header and accepts JSON fields `deviceId`, `blockedAttackCount`, `relayIsolated`, `protectionActive`, `baudRate`, `lineQuality`, `uptimeSeconds`, `voltage`, and `event`. `GET /api/telemetry` returns `{ "state": ..., "events": [...] }`. The browser only reads; it does not send remote relay or maintenance commands to the device.
+1. In [wokwi-sketch.ino](./wokwi-sketch.ino), replace `YOUR-VERCEL-PROJECT` in `TELEMETRY_URL` with the Vercel project name and replace `REPLACE_WITH_TELEMETRY_DEVICE_TOKEN` with the exact `TELEMETRY_DEVICE_TOKEN` value. Paste the updated sketch into Wokwi. Do not use the GitHub Pages URL for `TELEMETRY_URL`; it must end in `/api/telemetry`.
+2. If the dashboard is served by Vercel from this same project, leave the `telemetry-api-origin` meta tag empty. If it remains on GitHub Pages, set that tag in `index.html` to the Vercel origin, for example `<meta name="telemetry-api-origin" content="https://your-project.vercel.app">`, then publish the updated page.
+3. Start the Wokwi simulation. Its serial console should show `Telemetry POST: HTTP 200`; the dashboard should change from waiting to `DEVICE LIVE` and show events/counters within a few seconds. HTTP 401 means the token does not match; HTTP 503 means Redis is missing or unavailable.
 
-Wokwi provides the `Wokwi-GUEST` network with outbound internet access. The sketch uses `setInsecure()` for the simulator demo; for physical ESP32 hardware, replace that with certificate validation and protect the device token. Never commit the real token to a public repository. If the Wokwi project is public, use a demo-only token and rotate it after the presentation.
+## Data contract and safety
 
-## If your current sketch already has logic
+`POST /api/telemetry` requires the `X-Device-Token` header and accepts `deviceId`, `blockedAttackCount`, `relayIsolated`, `protectionActive`, `baudRate`, `lineQuality`, `uptimeSeconds`, `voltage`, and `event`. `GET /api/telemetry` returns `{ "state": ..., "events": [...] }`. The browser only reads; it does not send remote relay or maintenance commands to the device.
 
-The screenshot shows these same pin constants. If your current sketch has additional functionality, preserve it and port the Wi-Fi constants, `sendTelemetry()` helper, and `setEvent()` calls into your existing sketch rather than replacing your whole program. The provided sketch is a complete matching example, not a copy of any code that was not visible in the screenshot.
+The sketch uses Wokwi's `Wokwi-GUEST` network and `setInsecure()` for the simulator only. For physical ESP32 hardware, validate the server certificate. Never commit a real token to a public repository; public Wokwi projects should use a demo-only token and rotate it after the presentation.
+
+If your current sketch has additional logic, preserve it and port the Wi-Fi constants, `sendTelemetry()` helper, and `setEvent()` calls into it instead of replacing the whole program.
