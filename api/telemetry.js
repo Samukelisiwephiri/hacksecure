@@ -21,6 +21,17 @@ async function redis(commands) {
   return results.map((item) => item.result);
 }
 
+function storageErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === 'Upstash Redis is not configured') {
+    return 'Telemetry storage is not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel, then redeploy.';
+  }
+  if (/Redis returned (401|403)\b/.test(message)) {
+    return 'Upstash rejected the Redis credentials. Check UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel, then redeploy.';
+  }
+  return 'Telemetry storage is unavailable. Check the Vercel function logs for the Redis error.';
+}
+
 module.exports = async function handler(req, res) {
   for (const [key, value] of Object.entries(cors)) res.setHeader(key, value);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -36,7 +47,7 @@ module.exports = async function handler(req, res) {
       });
     } catch (error) {
       console.error('Telemetry read failed:', error.message);
-      return res.status(503).json({ error: 'Telemetry storage is unavailable' });
+      return res.status(503).json({ error: storageErrorMessage(error) });
     }
   }
   if (req.method !== 'POST') {
@@ -78,6 +89,6 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true, receivedAt: state.timestamp });
   } catch (error) {
     console.error('Telemetry write failed:', error.message);
-    return res.status(503).json({ error: 'Telemetry could not be stored' });
+    return res.status(503).json({ error: storageErrorMessage(error) });
   }
 };
